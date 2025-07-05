@@ -57,6 +57,7 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
   const [dragStart, setDragStart] = useState<Point>({ x: 0, y: 0 });
   const [canvasOffset, setCanvasOffset] = useState<Point>({ x: 0, y: 0 });
   const [selectedPolygon, setSelectedPolygon] = useState<string | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Default sample images (updated to use SVG files)
   const defaultImages = [
@@ -92,6 +93,174 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     return allImages[currentImageIndex] || `image_${currentImageIndex}`;
   };
 
+  const [currentImage, setCurrentImage] = useState<HTMLImageElement | null>(
+    null
+  );
+
+  const drawAnnotations = useCallback(
+    (ctx: CanvasRenderingContext2D) => {
+      // Draw paths
+      paths.forEach((path) => {
+        if (path.points.length < 2) return;
+        ctx.strokeStyle = path.color;
+        ctx.lineWidth = path.width;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation =
+          path.tool === "eraser" ? "destination-out" : "source-over";
+        ctx.beginPath();
+        ctx.moveTo(path.points[0].x, path.points[0].y);
+        for (let i = 1; i < path.points.length; i++) {
+          ctx.lineTo(path.points[i].x, path.points[i].y);
+        }
+        ctx.stroke();
+        // Reset composite operation
+        ctx.globalCompositeOperation = "source-over";
+      });
+
+      // Draw current path (while drawing)
+      if (currentPath.length > 1 && isDrawing) {
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = currentWidth;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation =
+          currentTool === "eraser" ? "destination-out" : "source-over";
+        ctx.beginPath();
+        ctx.moveTo(currentPath[0].x, currentPath[0].y);
+        for (let i = 1; i < currentPath.length; i++) {
+          ctx.lineTo(currentPath[i].x, currentPath[i].y);
+        }
+        ctx.stroke();
+        // Reset composite operation
+        ctx.globalCompositeOperation = "source-over";
+      }
+
+      // Draw polygons
+      polygons.forEach((polygon) => {
+        if (polygon.points.length < 2) return;
+        ctx.strokeStyle = polygon.color;
+        ctx.lineWidth = polygon.width;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation = "source-over";
+        ctx.beginPath();
+        ctx.moveTo(polygon.points[0].x, polygon.points[0].y);
+        for (let i = 1; i < polygon.points.length; i++) {
+          ctx.lineTo(polygon.points[i].x, polygon.points[i].y);
+        }
+        if (polygon.closed && polygon.points.length > 2) {
+          ctx.closePath();
+        }
+        ctx.stroke();
+
+        // Draw control points
+        polygon.points.forEach((point) => {
+          ctx.fillStyle = polygon.color;
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+      });
+
+      // Draw current polygon
+      if (currentPolygon.length > 0 && currentTool === "polygon") {
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = currentWidth;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation = "source-over";
+        if (currentPolygon.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(currentPolygon[0].x, currentPolygon[0].y);
+          for (let i = 1; i < currentPolygon.length; i++) {
+            ctx.lineTo(currentPolygon[i].x, currentPolygon[i].y);
+          }
+          ctx.stroke();
+        }
+        // Draw control points
+        currentPolygon.forEach((point) => {
+          ctx.fillStyle = currentColor;
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+      }
+    },
+    [
+      paths,
+      polygons,
+      currentPolygon,
+      currentTool,
+      currentColor,
+      currentWidth,
+      currentPath,
+      isDrawing,
+    ]
+  );
+
+  const redrawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Save context
+    ctx.save();
+
+    // Apply canvas offset for panning
+    ctx.translate(canvasOffset.x, canvasOffset.y);
+
+    // Draw current image if available
+    if (currentImage) {
+      const scale =
+        Math.min(
+          canvas.width / currentImage.width,
+          canvas.height / currentImage.height
+        ) * 0.8;
+      const width = currentImage.width * scale;
+      const height = currentImage.height * scale;
+      const x = (canvas.width - width) / 2 - canvasOffset.x;
+      const y = (canvas.height - height) / 2 - canvasOffset.y;
+
+      ctx.drawImage(currentImage, x, y, width, height);
+    }
+
+    // Draw annotations
+    drawAnnotations(ctx);
+
+    // Restore context
+    ctx.restore();
+  }, [currentImage, canvasOffset, drawAnnotations]);
+
+  // Load image when current image index changes
+  useEffect(() => {
+    if (allImages[currentImageIndex]) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+
+      img.onload = () => {
+        setCurrentImage(img);
+      };
+
+      img.onerror = (error) => {
+        console.error(
+          `Failed to load image: ${allImages[currentImageIndex]}`,
+          error
+        );
+        setCurrentImage(null);
+      };
+
+      img.src = allImages[currentImageIndex];
+    } else {
+      setCurrentImage(null);
+    }
+  }, [allImages, currentImageIndex]);
+
   // Load annotations when image changes
   useEffect(() => {
     const imageId = getCurrentImageId();
@@ -119,172 +288,42 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     }
   }, [paths, polygons, currentImageIndex, allImages, saveAnnotationsToStorage]);
 
+  // Redraw canvas when needed
   useEffect(() => {
     redrawCanvas();
-  }, [
-    paths,
-    polygons,
-    currentImageIndex,
-    allImages,
-    canvasOffset,
-    currentPolygon,
-  ]);
+  }, [redrawCanvas]);
 
-  const redrawCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Save context
-    ctx.save();
-
-    // Apply canvas offset for panning
-    ctx.translate(canvasOffset.x, canvasOffset.y);
-
-    // Draw current image if available
-    if (allImages[currentImageIndex]) {
-      const img = new Image();
-      img.onload = () => {
-        const scale =
-          Math.min(canvas.width / img.width, canvas.height / img.height) * 0.8;
-        const width = img.width * scale;
-        const height = img.height * scale;
-        const x = (canvas.width - width) / 2 - canvasOffset.x;
-        const y = (canvas.height - height) / 2 - canvasOffset.y;
-
-        ctx.drawImage(img, x, y, width, height);
-        drawPaths(ctx);
-        drawPolygons(ctx);
-        drawCurrentPolygon(ctx);
-      };
-      img.src = allImages[currentImageIndex];
-    } else {
-      drawPaths(ctx);
-      drawPolygons(ctx);
-      drawCurrentPolygon(ctx);
-    }
-
-    // Restore context
-    ctx.restore();
-  };
-
-  const drawPaths = (ctx: CanvasRenderingContext2D) => {
-    paths.forEach((path) => {
-      if (path.points.length < 2) return;
-
-      ctx.strokeStyle = path.color;
-      ctx.lineWidth = path.width;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.globalCompositeOperation =
-        path.tool === "eraser" ? "destination-out" : "source-over";
-
-      ctx.beginPath();
-      ctx.moveTo(path.points[0].x, path.points[0].y);
-
-      for (let i = 1; i < path.points.length; i++) {
-        ctx.lineTo(path.points[i].x, path.points[i].y);
+  // Additional redraw for smooth drawing during mouse move
+  useEffect(() => {
+    if (isDrawing && currentPath.length > 0) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
-
-      ctx.stroke();
-    });
-
-    // Draw current path
-    if (currentPath.length > 1 && currentTool !== "polygon") {
-      ctx.strokeStyle = currentTool === "eraser" ? "#000000" : currentColor;
-      ctx.lineWidth = currentWidth;
-      ctx.globalCompositeOperation =
-        currentTool === "eraser" ? "destination-out" : "source-over";
-
-      ctx.beginPath();
-      ctx.moveTo(currentPath[0].x, currentPath[0].y);
-
-      for (let i = 1; i < currentPath.length; i++) {
-        ctx.lineTo(currentPath[i].x, currentPath[i].y);
-      }
-
-      ctx.stroke();
-    }
-  };
-
-  const drawPolygons = (ctx: CanvasRenderingContext2D) => {
-    polygons.forEach((polygon) => {
-      if (polygon.points.length < 2) return;
-
-      ctx.strokeStyle = polygon.color;
-      ctx.lineWidth = polygon.width;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.globalCompositeOperation = "source-over";
-
-      // Draw polygon outline
-      ctx.beginPath();
-      ctx.moveTo(polygon.points[0].x, polygon.points[0].y);
-
-      for (let i = 1; i < polygon.points.length; i++) {
-        ctx.lineTo(polygon.points[i].x, polygon.points[i].y);
-      }
-
-      if (polygon.closed && polygon.points.length > 2) {
-        ctx.closePath();
-      }
-
-      ctx.stroke();
-
-      // Highlight selected polygon
-      if (selectedPolygon === polygon.id) {
-        ctx.strokeStyle = "#ff0000";
-        ctx.lineWidth = polygon.width + 2;
-        ctx.setLineDash([5, 5]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // Draw control points
-      polygon.points.forEach((point) => {
-        ctx.fillStyle =
-          selectedPolygon === polygon.id ? "#ff0000" : polygon.color;
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
-        ctx.fill();
+      animationFrameRef.current = requestAnimationFrame(() => {
+        redrawCanvas();
       });
-    });
-  };
-
-  const drawCurrentPolygon = (ctx: CanvasRenderingContext2D) => {
-    if (currentPolygon.length < 1 || currentTool !== "polygon") return;
-
-    ctx.strokeStyle = currentColor;
-    ctx.lineWidth = currentWidth;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.globalCompositeOperation = "source-over";
-
-    // Draw current polygon lines
-    if (currentPolygon.length > 1) {
-      ctx.beginPath();
-      ctx.moveTo(currentPolygon[0].x, currentPolygon[0].y);
-
-      for (let i = 1; i < currentPolygon.length; i++) {
-        ctx.lineTo(currentPolygon[i].x, currentPolygon[i].y);
-      }
-
-      ctx.stroke();
     }
 
-    // Draw control points
-    currentPolygon.forEach((point) => {
-      ctx.fillStyle = currentColor;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
-      ctx.fill();
-    });
-  };
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [currentPath, isDrawing, redrawCanvas]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      setIsDrawing(false);
+      setCurrentPath([]);
+      setCurrentPolygon([]);
+      setSelectedPolygon(null);
+      setCurrentImage(null);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
 
   const getMousePos = (e: React.MouseEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current;
@@ -316,6 +355,7 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     const pos = getMousePos(e);
 
     if (currentTool === "move") {
@@ -339,11 +379,14 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
       return;
     }
 
+    // For pen and eraser tools
+    console.log("Starting drawing with tool:", currentTool);
     setIsDrawing(true);
     setCurrentPath([pos]);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     const pos = getMousePos(e);
 
     if (currentTool === "move" && isDragging) {
@@ -359,11 +402,13 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
 
     if (!isDrawing || currentTool === "polygon") return;
 
+    console.log("Adding point to path:", pos);
     setCurrentPath((prev) => [...prev, pos]);
-    redrawCanvas();
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e?: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e) e.preventDefault();
+
     if (currentTool === "move") {
       setIsDragging(false);
       return;
@@ -375,6 +420,7 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     }
 
     if (isDrawing && currentPath.length > 1) {
+      console.log("Completing path with", currentPath.length, "points");
       const newPath: DrawingPath = {
         points: currentPath,
         color: currentColor,
@@ -389,7 +435,14 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     setCurrentPath([]);
   };
 
-  const handleDoubleClick = () => {
+  const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (currentTool === "polygon" && currentPolygon.length >= 3) {
+      completePolygon();
+    }
+  };
+
+  const completePolygon = () => {
     if (currentTool === "polygon" && currentPolygon.length >= 3) {
       // Complete the polygon
       const newPolygon: Polygon = {
@@ -555,7 +608,7 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
           {currentTool === "polygon" && currentPolygon.length >= 3 && (
             <button
               className="tool-btn success"
-              onClick={handleDoubleClick}
+              onClick={completePolygon}
               title="Complete Polygon"
             >
               ✓ Complete
