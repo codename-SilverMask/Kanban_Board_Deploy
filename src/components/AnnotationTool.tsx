@@ -1,4 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
+
 import {
   Pen,
   Eraser,
@@ -68,7 +75,9 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     "/sample-images/sample5.svg",
   ];
 
-  const allImages = [...defaultImages, ...images, ...uploadedImages];
+  const allImages = useMemo(() => {
+    return [...defaultImages, ...images, ...uploadedImages];
+  }, [images, uploadedImages]);
 
   // localStorage utilities
   const saveAnnotationsToStorage = useCallback(
@@ -89,9 +98,9 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     []
   );
 
-  const getCurrentImageId = () => {
+  const currentImageId = useMemo(() => {
     return allImages[currentImageIndex] || `image_${currentImageIndex}`;
-  };
+  }, [allImages, currentImageIndex]);
 
   const [currentImage, setCurrentImage] = useState<HTMLImageElement | null>(
     null
@@ -239,32 +248,27 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
 
   // Load image when current image index changes
   useEffect(() => {
-    if (allImages[currentImageIndex]) {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
+    const src = allImages[currentImageIndex];
+    if (!src) return;
 
-      img.onload = () => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      // Only update if the image isn't already the same one
+      if (img.src !== currentImage?.src) {
         setCurrentImage(img);
-      };
-
-      img.onerror = (error) => {
-        console.error(
-          `Failed to load image: ${allImages[currentImageIndex]}`,
-          error
-        );
-        setCurrentImage(null);
-      };
-
-      img.src = allImages[currentImageIndex];
-    } else {
+      }
+    };
+    img.onerror = (err) => {
+      console.error(`Failed to load image ${src}`, err);
       setCurrentImage(null);
-    }
+    };
+    img.src = src;
   }, [allImages, currentImageIndex]);
 
   // Load annotations when image changes
   useEffect(() => {
-    const imageId = getCurrentImageId();
-    const stored = loadAnnotationsFromStorage(imageId);
+    const stored = loadAnnotationsFromStorage(currentImageId);
     if (stored) {
       setPaths(stored.paths);
       setPolygons(stored.polygons);
@@ -273,12 +277,12 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
       setPolygons([]);
     }
     setCanvasOffset({ x: 0, y: 0 });
-  }, [currentImageIndex, allImages, loadAnnotationsFromStorage]);
+  }, [currentImageId, loadAnnotationsFromStorage]);
 
   // Save annotations whenever they change
   useEffect(() => {
     if (allImages.length > 0) {
-      const imageId = getCurrentImageId();
+      const imageId = currentImageId;
       const annotations: AnnotationData = {
         imageId,
         paths,
@@ -379,8 +383,6 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
       return;
     }
 
-    // For pen and eraser tools
-    console.log("Starting drawing with tool:", currentTool);
     setIsDrawing(true);
     setCurrentPath([pos]);
   };
@@ -402,7 +404,6 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
 
     if (!isDrawing || currentTool === "polygon") return;
 
-    console.log("Adding point to path:", pos);
     setCurrentPath((prev) => [...prev, pos]);
   };
 
@@ -420,7 +421,6 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     }
 
     if (isDrawing && currentPath.length > 1) {
-      console.log("Completing path with", currentPath.length, "points");
       const newPath: DrawingPath = {
         points: currentPath,
         color: currentColor,
@@ -512,6 +512,15 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
     if (currentImageIndex > 0) {
       setCurrentImageIndex((prev) => prev - 1);
     }
+  };
+  const handleManualSave = () => {
+    const annotations: AnnotationData = {
+      imageId: currentImageId,
+      paths,
+      polygons,
+    };
+    saveAnnotationsToStorage(currentImageId, annotations);
+    alert("Annotations saved to localStorage!");
   };
 
   return (
@@ -630,7 +639,9 @@ const AnnotationTool: React.FC<AnnotationToolProps> = ({ images = [] }) => {
           <button className="tool-btn" onClick={downloadImage} title="Download">
             <Download size={20} />
           </button>
-
+          <button className="tool-btn success" onClick={handleManualSave}>
+            💾 Save
+          </button>
           <button
             className="tool-btn danger"
             onClick={clearCanvas}
