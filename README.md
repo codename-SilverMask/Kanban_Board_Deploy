@@ -106,6 +106,122 @@ The board includes three default columns:
 - **In Progress**: Tasks currently being worked on
 - **Done**: Completed tasks
 
+## Annotation Tool Development Challenges
+
+During the development of the annotation tool, several significant challenges were encountered that required multiple iterations and architectural changes:
+
+### 1. React Router Navigation Conflicts
+
+**Challenge**: The most persistent issue was that after annotating images (drawing on the canvas), React Router navigation would break completely. Users couldn't navigate to other pages after drawing.
+
+**Root Cause**: Custom mouse event handlers were interfering with React Router's navigation system through:
+
+- Global event listeners attached to the document
+- Event propagation being stopped with `stopPropagation()`
+- Canvas-specific event handling creating conflicts
+
+**Solutions Attempted**:
+
+- Conditional event prevention based on active tools
+- Manual cleanup of event listeners in the "Finish" button
+- Adding `drawingDisabled` state to prevent event handling
+- Global mouseup handlers for cleanup
+- Animation frame management for smooth drawing
+
+**Final Resolution**: Initially attempted to use the `react-canvas-annotation` library, but it had compatibility issues with React 19. Ultimately rebuilt with a simpler custom solution focusing on proper event cleanup.
+
+### 2. State Management Complexity
+
+**Challenge**: Managing multiple interconnected states (drawing state, tool selection, canvas offset, polygon creation) led to complex useEffect dependencies and potential memory leaks.
+
+**Issues Encountered**:
+
+- Animation frames not being properly cancelled
+- Drawing state persisting after navigation attempts
+- Infinite re-renders due to complex useEffect dependencies
+- State not being reset when switching between tools
+
+**Solution**: Simplified state management by:
+
+- Consolidating related states
+- Using proper cleanup functions in useEffect
+- Implementing a centralized "finish" function for state reset
+- Removing unnecessary global event listeners
+
+### 3. Canvas Drawing Performance
+
+**Challenge**: Free-hand drawing with the pen tool needed to be smooth while maintaining good performance, especially with continuous mouse move events.
+
+**Technical Hurdles**:
+
+- Too many state updates during mouse move causing lag
+- Canvas redrawing on every point addition
+- Memory leaks from accumulating animation frames
+
+**Optimizations Implemented**:
+
+- RequestAnimationFrame for smooth drawing
+- Debounced canvas redraws
+- Proper cleanup of animation frame references
+- Optimized path rendering with minimal state updates
+
+### 4. Multi-Image Annotation Persistence
+
+**Challenge**: Maintaining separate annotations for each image while switching between multiple uploaded images.
+
+**Implementation Complexity**:
+
+- localStorage key management for different images
+- State synchronization when switching images
+- Preventing annotation loss during navigation
+- Handling both default sample images and user uploads
+
+**Solution**: Created a robust localStorage system with:
+
+- Image-specific keys for annotation data
+- Automatic save/load on image switching
+- Separate storage for paths and polygons
+- Export functionality for annotation data
+
+### 5. Package Compatibility Issues
+
+**Challenge**: The `react-canvas-annotation` package had peer dependency conflicts with React 19, causing the application to display a white screen.
+
+**Debugging Process**:
+
+- Dependency resolution errors
+- React version compatibility issues
+- Package deprecation warnings
+- Build system conflicts
+
+**Resolution**: Reverted to a custom implementation that:
+
+- Works natively with React 19
+- Has no external dependencies for core functionality
+- Provides better control over event handling
+- Eliminates navigation conflicts
+
+### 6. Cross-Browser Event Handling
+
+**Challenge**: Different browsers handle canvas mouse events differently, especially regarding touch devices and pointer events.
+
+**Considerations**:
+
+- Mouse vs. touch event compatibility
+- Pointer event standardization
+- Browser-specific quirks with preventDefault
+- Mobile device interaction patterns
+
+### Lessons Learned
+
+1. **Event Management**: Proper event cleanup is crucial when mixing canvas interactions with React Router
+2. **Library Selection**: Always verify package compatibility with your React version before integration
+3. **State Simplification**: Complex state interactions should be simplified and centralized
+4. **Performance Monitoring**: Canvas operations need careful performance consideration
+5. **User Experience**: Navigation should never be blocked by drawing operations
+
+The final annotation tool, while simpler than initially envisioned, provides reliable functionality without compromising the overall application stability.
+
 ## Project Structure
 
 ```
