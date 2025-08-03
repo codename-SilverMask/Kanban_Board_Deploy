@@ -2,6 +2,8 @@
 
 A modern, responsive Kanban board application built with React, TypeScript, and Vite. This application allows you to organize tasks with intuitive drag-and-drop functionality across different columns.
 
+Live Demo: https://kanban-board-deploy.vercel.app/
+
 ## Features
 
 - **🎯 Drag & Drop**: Seamlessly move tasks between columns
